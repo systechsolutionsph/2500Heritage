@@ -24,6 +24,8 @@ import { sports } from '../data/sports'
 import { isAdminUnlocked, signInAdmin } from '../data/adminAuth'
 import PasswordInput from '../components/ui/PasswordInput'
 import GalleryAdmin from '../components/admin/GalleryAdmin'
+import PaymentHistory from '../components/admin/PaymentHistory'
+import { downloadScheduleImage } from '../components/admin/scheduleImage'
 import { loadGalleryImages } from '../data/galleryImages'
 import { getPaymentQrCode, loadPaymentQrCode, savePaymentQrCode } from '../data/paymentQr'
 import { isSupabaseConfigured, requireSupabase } from '../data/supabase'
@@ -61,11 +63,12 @@ function resizePaymentQr(file: File): Promise<string> {
   })
 }
 
-type AdminSectionId = 'bookings' | 'payments' | 'courts' | 'payment-qr' | 'gallery'
+type AdminSectionId = 'bookings' | 'payments' | 'payment-history' | 'courts' | 'payment-qr' | 'gallery'
 
 const adminSections: { id: AdminSectionId; label: string }[] = [
   { id: 'bookings', label: 'Bookings calendar' },
   { id: 'payments', label: 'Payment review' },
+  { id: 'payment-history', label: 'Payment history' },
   { id: 'courts', label: 'Courts & pricing' },
   { id: 'payment-qr', label: 'Payment QR setup' },
   { id: 'gallery', label: 'Gallery photos' },
@@ -195,6 +198,8 @@ function AdminDashboard() {
   const [paymentActionError, setPaymentActionError] = useState('')
   const [paymentProofUrls, setPaymentProofUrls] = useState<Record<string, string>>({})
   const [paymentProofErrors, setPaymentProofErrors] = useState<Record<string, string>>({})
+  const [downloadingSchedule, setDownloadingSchedule] = useState(false)
+  const [scheduleDownloadError, setScheduleDownloadError] = useState('')
 
   useEffect(() => {
     let active = true
@@ -354,6 +359,18 @@ function AdminDashboard() {
       await updateCustomerBookingsByReference(reference, 'rejected')
     } catch (error) {
       setPaymentActionError(error instanceof Error ? error.message : 'Could not reject this payment.')
+    }
+  }
+
+  async function downloadSchedule() {
+    setScheduleDownloadError('')
+    setDownloadingSchedule(true)
+    try {
+      await downloadScheduleImage(activeDayData.iso)
+    } catch (error) {
+      setScheduleDownloadError(error instanceof Error ? error.message : 'Could not download the schedule image.')
+    } finally {
+      setDownloadingSchedule(false)
     }
   }
 
@@ -627,6 +644,8 @@ function AdminDashboard() {
 
       {activeSection === 'gallery' && <GalleryAdmin />}
 
+      {activeSection === 'payment-history' && <PaymentHistory />}
+
       {activeSection === 'payments' && (
       <section className="rounded-card border border-ink/10 bg-sand p-5 shadow-xl shadow-ink/5 sm:p-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -723,10 +742,24 @@ function AdminDashboard() {
 
       {activeSection === 'bookings' && (
       <>
-      <div className="mb-5">
-        <h2 className="font-display text-lg font-semibold text-ink">Bookings calendar</h2>
-        <p className="mt-1 text-sm text-ink/60">Select a slot to create a booking or block time; select an existing entry to manage it.</p>
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="font-display text-lg font-semibold text-ink">Bookings calendar</h2>
+          <p className="mt-1 text-sm text-ink/60">Select a slot to create a booking or block time; select an existing entry to manage it.</p>
+        </div>
+        <Button
+          type="button"
+          variant="primary"
+          className="!min-h-10 !px-5 !py-2"
+          onClick={() => void downloadSchedule()}
+          disabled={adminStoreLoading || downloadingSchedule}
+        >
+          {downloadingSchedule ? 'Preparing image…' : 'Download schedule (PNG)'}
+        </Button>
       </div>
+      {scheduleDownloadError && (
+        <p role="alert" className="mb-4 rounded-xl bg-tide/10 px-4 py-3 text-sm text-tide">{scheduleDownloadError}</p>
+      )}
       <div className="overflow-hidden rounded-card border border-ink/10 bg-sand shadow-xl shadow-ink/5">
         <div className="bg-ink px-4 py-5 sm:px-6">
           <div className="flex items-center justify-between gap-3">
