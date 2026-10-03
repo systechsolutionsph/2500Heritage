@@ -3,7 +3,7 @@ import { isSlotTaken } from '../../data/store'
 import logoFull from '../../assets/logo-full.png'
 
 // Draws the day's court availability as a shareable PNG (green = open,
-// beige = booked / reserved / blocked / already past) and downloads it.
+// beige = booked / reserved / blocked, hatched = already past) and downloads it.
 
 const W = 1200
 const SCALE = 2
@@ -20,6 +20,8 @@ const CREAM = '#F7F4E8'
 const BORDER = '#DDD6C0'
 const GREEN = '#2F6B4F'
 const UNAVAILABLE = '#E3DDCB'
+const PAST = '#EEE9DC'
+const PAST_LINE = '#C9C1AE'
 const DISPLAY = '"Bricolage Grotesque", "Inter", system-ui, sans-serif'
 const BODY = '"Inter", system-ui, sans-serif'
 
@@ -45,6 +47,25 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.arcTo(x, y + h, x, y, r)
   ctx.arcTo(x, y, x + w, y, r)
   ctx.closePath()
+}
+
+function pastIndicator(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.fillStyle = PAST
+  roundRect(ctx, x, y, w, h, r)
+  ctx.fill()
+
+  ctx.save()
+  roundRect(ctx, x, y, w, h, r)
+  ctx.clip()
+  ctx.strokeStyle = PAST_LINE
+  ctx.lineWidth = 1
+  for (let offset = -h; offset < w; offset += 8) {
+    ctx.beginPath()
+    ctx.moveTo(x + offset, y + h)
+    ctx.lineTo(x + offset + h, y)
+    ctx.stroke()
+  }
+  ctx.restore()
 }
 
 function text(
@@ -165,11 +186,16 @@ export async function downloadScheduleImage(dayIso: string) {
 
     hourSlots.forEach((slot, colIndex) => {
       const x = gridLeft + colIndex * (cellW + GAP)
-      const available = !isSlotTaken(dayIso, court.id, slot.hour) && !isSlotPast(dayIso, slot.hour)
+      const past = isSlotPast(dayIso, slot.hour)
+      const available = !isSlotTaken(dayIso, court.id, slot.hour) && !past
 
-      ctx.fillStyle = available ? GREEN : UNAVAILABLE
-      roundRect(ctx, x, y, cellW, ROW_H, 6)
-      ctx.fill()
+      if (past) {
+        pastIndicator(ctx, x, y, cellW, ROW_H, 6)
+      } else {
+        ctx.fillStyle = available ? GREEN : UNAVAILABLE
+        roundRect(ctx, x, y, cellW, ROW_H, 6)
+        ctx.fill()
+      }
 
       if (available) {
         const cx = x + cellW / 2
@@ -196,6 +222,8 @@ export async function downloadScheduleImage(dayIso: string) {
   roundRect(ctx, PAD + 130, legendY - 14, 22, 16, 4)
   ctx.fill()
   text(ctx, 'Unavailable', PAD + 162, legendY - 1, `500 14px ${BODY}`, INK)
+  pastIndicator(ctx, PAD + 300, legendY - 14, 22, 16, 4)
+  text(ctx, 'Past', PAD + 332, legendY - 1, `500 14px ${BODY}`, INK)
 
   ctx.strokeStyle = BORDER
   ctx.lineWidth = 1.5
