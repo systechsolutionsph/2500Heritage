@@ -1,9 +1,10 @@
 import { bookingCourts, hourSlots, isSlotPast } from '../../data/booking'
-import { isSlotTaken } from '../../data/store'
+import { getBlockAt, getBookingAt } from '../../data/store'
+import { sports } from '../../data/sports'
 import logoFull from '../../assets/logo-full.png'
 
 // Draws the day's court availability as a shareable PNG (green = open,
-// beige = booked / reserved / blocked, hatched = already past) and downloads it.
+// booked = sport emoji, hatched = already past) and downloads it.
 
 const W = 1200
 const SCALE = 2
@@ -18,10 +19,24 @@ const INK = '#17302A'
 const MUTED = 'rgba(23, 48, 42, 0.55)'
 const CREAM = '#F7F4E8'
 const BORDER = '#DDD6C0'
-const GREEN = '#2F6B4F'
-const UNAVAILABLE = '#E3DDCB'
-const PAST = '#EEE9DC'
-const PAST_LINE = '#C9C1AE'
+const AVAILABLE = '#DCCDA5'
+const AVAILABLE_LINE = '#B8A878'
+const PAST = '#E4E5E3'
+const PAST_EDGE = '#C4C7C4'
+const PAST_LINE = '#A3A6A3'
+// Booked cells use the same markers as the public booking page.
+// No customer names are drawn.
+const SPORT_EMOJI: Record<string, string> = {
+  PB: '\u{1F3D3}', // 🏓
+  BM: '\u{1F3F8}', // 🏸
+  TK: '\u{1F94B}', // 🥋
+}
+const LOCK_EMOJI = '\u{1F512}' // 🔒
+const BLOCK_EMOJI = '\u{1F6AB}' // 🚫
+const BOOKED = '#A13B49'
+const RESERVED = '#D3A53A'
+const BLOCKED = '#111111'
+const EMOJI_FONT = '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif'
 const DISPLAY = '"Bricolage Grotesque", "Inter", system-ui, sans-serif'
 const BODY = '"Inter", system-ui, sans-serif'
 
@@ -49,6 +64,22 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath()
 }
 
+function drawReclubLogo(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
+  const scale = size / 40
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.scale(scale, scale)
+  ctx.fillStyle = '#FFE34D'
+  roundRect(ctx, 0, 0, 40, 40, 10)
+  ctx.fill()
+  ctx.strokeStyle = '#4055C8'
+  ctx.lineWidth = 4
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.stroke(new Path2D('M13 30V10h8.5a6 6 0 0 1 0 12H13m7 0 8 8'))
+  ctx.restore()
+}
+
 function pastIndicator(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.fillStyle = PAST
   roundRect(ctx, x, y, w, h, r)
@@ -66,6 +97,21 @@ function pastIndicator(ctx: CanvasRenderingContext2D, x: number, y: number, w: n
     ctx.stroke()
   }
   ctx.restore()
+
+  ctx.strokeStyle = PAST_EDGE
+  ctx.lineWidth = 1
+  roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, r)
+  ctx.stroke()
+}
+
+function availableIndicator(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.fillStyle = AVAILABLE
+  roundRect(ctx, x, y, w, h, r)
+  ctx.fill()
+  ctx.strokeStyle = AVAILABLE_LINE
+  ctx.lineWidth = 1
+  roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, r)
+  ctx.stroke()
 }
 
 function text(
@@ -178,6 +224,7 @@ export async function downloadScheduleImage(dayIso: string) {
   })
 
   // Court rows
+  const usedLegend = new Set<string>()
   courts.forEach((court, rowIndex) => {
     const y = gridTop + rowIndex * (ROW_H + ROW_GAP)
     const [mainName, subName] = court.name.split(' — ')
@@ -187,43 +234,99 @@ export async function downloadScheduleImage(dayIso: string) {
     hourSlots.forEach((slot, colIndex) => {
       const x = gridLeft + colIndex * (cellW + GAP)
       const past = isSlotPast(dayIso, slot.hour)
-      const available = !isSlotTaken(dayIso, court.id, slot.hour) && !past
+      const booking = getBookingAt(dayIso, court.id, slot.hour)
+      const block = booking ? undefined : getBlockAt(dayIso, court.id, slot.hour)
 
-      if (past) {
-        pastIndicator(ctx, x, y, cellW, ROW_H, 6)
-      } else {
-        ctx.fillStyle = available ? GREEN : UNAVAILABLE
+      if (booking || block) {
+        const sportId = sports.find((sport) => sport.name === booking?.sport)?.id
+        const reserved = Boolean(booking && booking.status !== 'confirmed')
+        let fill = BOOKED
+        if (block) fill = BLOCKED
+        else if (reserved) fill = RESERVED
+
+        let legendKey = 'booked'
+        if (block) legendKey = 'blocked'
+        else if (booking?.source === 'reclub') legendKey = 'reclub'
+        else if (reserved) legendKey = 'reserved'
+        else if (sportId) legendKey = `sport:${sportId}`
+        usedLegend.add(legendKey)
+
+        ctx.save()
+        if (past) ctx.globalAlpha = 0.6
+        ctx.fillStyle = fill
         roundRect(ctx, x, y, cellW, ROW_H, 6)
         ctx.fill()
-      }
 
-      if (available) {
-        const cx = x + cellW / 2
-        const cy = y + ROW_H / 2
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)'
-        ctx.lineWidth = 2.5
-        ctx.lineCap = 'round'
-        ctx.lineJoin = 'round'
-        ctx.beginPath()
-        ctx.moveTo(cx - 7, cy)
-        ctx.lineTo(cx - 2, cy + 6)
-        ctx.lineTo(cx + 8, cy - 6)
-        ctx.stroke()
+        if (booking?.source === 'reclub' && !reserved) {
+          drawReclubLogo(ctx, x + cellW / 2 - 12, y + ROW_H / 2 - 12, 24)
+        } else {
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          if (reserved) {
+            ctx.font = `700 18px ${BODY}`
+            ctx.fillStyle = INK
+            ctx.fillText('R', x + cellW / 2, y + ROW_H / 2 + 1)
+          } else {
+            ctx.font = `22px ${EMOJI_FONT}`
+            ctx.fillStyle = '#FFFFFF'
+            const marker = block ? BLOCK_EMOJI : sportId ? SPORT_EMOJI[sportId] ?? LOCK_EMOJI : LOCK_EMOJI
+            ctx.fillText(marker, x + cellW / 2, y + ROW_H / 2 + 1)
+          }
+        }
+        ctx.restore()
+      } else if (past) {
+        usedLegend.add('past')
+        pastIndicator(ctx, x, y, cellW, ROW_H, 6)
+      } else {
+        availableIndicator(ctx, x, y, cellW, ROW_H, 6)
       }
     })
   })
 
-  // Legend
-  ctx.fillStyle = GREEN
-  roundRect(ctx, PAD, legendY - 14, 22, 16, 4)
-  ctx.fill()
-  text(ctx, 'Available', PAD + 32, legendY - 1, `500 14px ${BODY}`, INK)
-  ctx.fillStyle = UNAVAILABLE
-  roundRect(ctx, PAD + 130, legendY - 14, 22, 16, 4)
-  ctx.fill()
-  text(ctx, 'Unavailable', PAD + 162, legendY - 1, `500 14px ${BODY}`, INK)
-  pastIndicator(ctx, PAD + 300, legendY - 14, 22, 16, 4)
-  text(ctx, 'Past', PAD + 332, legendY - 1, `500 14px ${BODY}`, INK)
+  // Legend: only the entries that actually appear on this day
+  const legendItems: { key: string; label: string; color?: string; marker?: string; hatched?: boolean; logo?: boolean; available?: boolean }[] = [
+    { key: 'available', label: 'Available', available: true },
+    ...sports
+      .filter((sport) => usedLegend.has(`sport:${sport.id}`))
+      .map((sport) => ({
+        key: `sport:${sport.id}`,
+        label: `${sport.name} booked`,
+        color: BOOKED,
+        marker: SPORT_EMOJI[sport.id] ?? LOCK_EMOJI,
+      })),
+    ...(usedLegend.has('reserved') ? [{ key: 'reserved', label: 'Reserved', color: RESERVED, marker: 'R' }] : []),
+    ...(usedLegend.has('reclub') ? [{ key: 'reclub', label: 'Reclub', logo: true }] : []),
+    ...(usedLegend.has('booked') ? [{ key: 'booked', label: 'Booked', color: BOOKED, marker: LOCK_EMOJI }] : []),
+    ...(usedLegend.has('blocked') ? [{ key: 'blocked', label: 'Blocked', color: BLOCKED, marker: BLOCK_EMOJI }] : []),
+    { key: 'past', label: 'Past', hatched: true },
+  ]
+  let legendX = PAD
+  legendItems.forEach((item) => {
+    const swatchW = item.marker || item.logo ? 28 : 22
+    if (item.available) {
+      availableIndicator(ctx, legendX, legendY - 16, swatchW, 20, 4)
+    } else if (item.hatched) {
+      pastIndicator(ctx, legendX, legendY - 16, swatchW, 20, 4)
+    } else if (item.logo) {
+      drawReclubLogo(ctx, legendX + 4, legendY - 16, 20)
+    } else {
+      ctx.fillStyle = item.color ?? AVAILABLE
+      roundRect(ctx, legendX, legendY - 16, swatchW, 20, 4)
+      ctx.fill()
+      if (item.marker) {
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        const isLetter = item.marker === 'R'
+        ctx.font = isLetter ? `700 13px ${BODY}` : `14px ${EMOJI_FONT}`
+        ctx.fillStyle = isLetter ? INK : '#FFFFFF'
+        ctx.fillText(item.marker, legendX + swatchW / 2, legendY - 5)
+        ctx.textBaseline = 'alphabetic'
+      }
+    }
+    text(ctx, item.label, legendX + swatchW + 10, legendY - 1, `500 14px ${BODY}`, INK)
+    ctx.font = `500 14px ${BODY}`
+    legendX += swatchW + 10 + ctx.measureText(item.label).width + 24
+  })
 
   ctx.strokeStyle = BORDER
   ctx.lineWidth = 1.5
