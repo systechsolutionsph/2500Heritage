@@ -356,7 +356,7 @@ export async function downloadScheduleImage(dayIso: string) {
   text(ctx, bookingUrl.replace(/^https?:\/\//, ''), textX, footerTop + 84, `500 15px ${BODY}`, MUTED)
   text(
     ctx,
-    `Generated ${new Date().toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}`,
+    `Generated ${new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}`,
     textX,
     footerTop + 112,
     `400 12px ${BODY}`,

@@ -1,6 +1,34 @@
 import { notifyBookingStoreChanged } from './store'
 import { isSupabaseConfigured, requireSupabase } from './supabase'
 
+// The courts are in the Philippines, so booking availability ("today",
+// "is this slot past") must always follow Philippine wall-clock time —
+// not whatever timezone a visitor's device happens to be set to. This
+// builds a Date whose local getters (getHours, getDate, etc.) report
+// Asia/Manila time no matter where the browser thinks it is.
+export function nowInManila(): Date {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date())
+
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? '0')
+  const year = get('year')
+  const month = get('month') - 1
+  const day = get('day')
+  const hour = get('hour') % 24 // some locales report midnight as "24"
+  const minute = get('minute')
+  const second = get('second')
+
+  return new Date(year, month, day, hour, minute, second)
+}
+
 export interface BookingCourt {
   id: string
   name: string
@@ -130,7 +158,7 @@ function toLocalDateIso(date: Date) {
 }
 
 export function getDayOptions(count = 7, startOffset = 0): DayOption[] {
-  const today = new Date()
+  const today = nowInManila()
   today.setHours(0, 0, 0, 0)
   return Array.from({ length: count }, (_, i) => {
     const d = new Date(today)
@@ -152,8 +180,10 @@ export function formatFullDate(d: Date) {
 export { isSlotTaken as isSlotBooked } from './store'
 
 export function isSlotPast(dayIso: string, hour: number) {
-  const now = new Date()
+  const now = nowInManila()
   const slotDate = new Date(`${dayIso}T00:00:00`)
-  slotDate.setHours(hour)
-  return slotDate.getTime() < now.getTime()
+  // A slot only counts as "past" once it has fully ended, not the moment
+  // it starts — an 8–9 PM booking should still show through 8:59 PM.
+  slotDate.setHours(hour + 1)
+  return slotDate.getTime() <= now.getTime()
 }

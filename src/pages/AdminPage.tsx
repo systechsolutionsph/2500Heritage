@@ -25,6 +25,7 @@ import { isAdminUnlocked, signInAdmin } from '../data/adminAuth'
 import PasswordInput from '../components/ui/PasswordInput'
 import GalleryAdmin from '../components/admin/GalleryAdmin'
 import PaymentHistory from '../components/admin/PaymentHistory'
+import ScheduleHistory from '../components/admin/ScheduleHistory'
 import { downloadScheduleImage } from '../components/admin/scheduleImage'
 import { loadGalleryImages } from '../data/galleryImages'
 import { getPaymentQrCode, loadPaymentQrCode, savePaymentQrCode } from '../data/paymentQr'
@@ -63,16 +64,33 @@ function resizePaymentQr(file: File): Promise<string> {
   })
 }
 
-type AdminSectionId = 'bookings' | 'payments' | 'payment-history' | 'courts' | 'payment-qr' | 'gallery'
+type AdminSectionId =
+  | 'bookings'
+  | 'schedule-history'
+  | 'payments'
+  | 'payment-history'
+  | 'courts'
+  | 'payment-qr'
+  | 'gallery'
 
 const adminSections: { id: AdminSectionId; label: string }[] = [
   { id: 'bookings', label: 'Bookings calendar' },
+  { id: 'schedule-history', label: 'Schedule history' },
   { id: 'payments', label: 'Payment review' },
   { id: 'payment-history', label: 'Payment history' },
   { id: 'courts', label: 'Courts & pricing' },
   { id: 'payment-qr', label: 'Payment QR setup' },
   { id: 'gallery', label: 'Gallery photos' },
 ]
+
+// Same markers the public booking page uses for confirmed bookings.
+const sportBookingMarkers: Record<string, string> = {
+  PB: '\u{1F3D3}', // 🏓
+  BM: '\u{1F3F8}', // 🏸
+  TK: '\u{1F94B}', // 🥋
+}
+const DEFAULT_BOOKED_MARKER = '\u{1F512}' // 🔒 confirmed, no sport recorded
+const BLOCKED_MARKER = '\u{1F6AB}' // 🚫
 
 export default function AdminPage() {
   const [access, setAccess] = useState<'checking' | 'locked' | 'unlocked'>('checking')
@@ -646,6 +664,8 @@ function AdminDashboard() {
 
       {activeSection === 'payment-history' && <PaymentHistory />}
 
+      {activeSection === 'schedule-history' && <ScheduleHistory />}
+
       {activeSection === 'payments' && (
       <section className="rounded-card border border-ink/10 bg-sand p-5 shadow-xl shadow-ink/5 sm:p-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -813,7 +833,13 @@ function AdminDashboard() {
           <LegendSwatch className="border border-ink/20 bg-sand" label="Available" />
           <LegendSwatch className="bg-citrus" label="Reserved" />
           <LegendSwatch className="bg-tide" label="Booked" />
-          <LegendSwatch className="bg-ink/50" label="Blocked" />
+          {sports.map((item) => (
+            <span key={item.id} className="inline-flex items-center gap-1.5">
+              <span aria-hidden="true">{sportBookingMarkers[item.id]}</span>
+              {item.name}
+            </span>
+          ))}
+          <LegendSwatch className="bg-ink/50" label="Blocked 🚫" />
           <LegendSwatch className="bg-citrus" label="Selecting" />
           <LegendSwatch className="border border-ink/10 bg-sand-dim" label="Past" />
         </div>
@@ -851,7 +877,7 @@ function AdminDashboard() {
                     )
 
                     let cls =
-                      'flex h-11 items-center justify-center rounded-lg border text-[0.65rem] font-semibold transition-all sm:h-12 '
+                      'flex h-11 items-center justify-center rounded-lg border text-base font-semibold transition-all sm:h-12 '
                     let label = ''
                     if (past) {
                       cls += 'cursor-not-allowed border-ink/5 bg-sand-dim text-ink/25'
@@ -860,10 +886,16 @@ function AdminDashboard() {
                       label = 'R'
                     } else if (booking) {
                       cls += 'cursor-pointer border-tide bg-tide text-sand'
-                      label = booking.source === 'reclub' ? '' : booking.name.split(' ')[0]
+                      const bookedSport = sports.find((item) => item.name === booking.sport)
+                      label =
+                        booking.source === 'reclub'
+                          ? ''
+                          : bookedSport
+                            ? sportBookingMarkers[bookedSport.id] ?? DEFAULT_BOOKED_MARKER
+                            : DEFAULT_BOOKED_MARKER
                     } else if (block) {
                       cls += 'cursor-pointer border-ink/50 bg-ink/50 text-sand'
-                      label = '⛔'
+                      label = BLOCKED_MARKER
                     } else if (isSelecting) {
                       cls += 'cursor-pointer border-citrus bg-citrus text-ink'
                       label = '✓'
