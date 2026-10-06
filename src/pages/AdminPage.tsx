@@ -31,6 +31,8 @@ import { loadGalleryImages } from '../data/galleryImages'
 import { getPaymentQrCode, loadPaymentQrCode, savePaymentQrCode } from '../data/paymentQr'
 import { isSupabaseConfigured, requireSupabase } from '../data/supabase'
 
+const MAX_PAYMENT_QR_BYTES = 3 * 1024 * 1024
+
 interface Range {
   courtId: string
   startHour: number
@@ -202,6 +204,7 @@ function AdminDashboard() {
   const [selections, setSelections] = useState<Range[]>([])
   const [assignFormOpen, setAssignFormOpen] = useState(false)
   const [editingBooking, setEditingBooking] = useState<StoredBooking | null>(null)
+  const [viewingPastBooking, setViewingPastBooking] = useState<StoredBooking | null>(null)
   const [viewingBlockId, setViewingBlockId] = useState<string | null>(null)
   const [courtDraft, setCourtDraft] = useState<BookingCourt[]>(() => bookingCourts.map((court) => ({ ...court })))
   const [courtSettingsError, setCourtSettingsError] = useState('')
@@ -314,8 +317,8 @@ function AdminDashboard() {
       input.value = ''
       return
     }
-    if (file.size > 8 * 1024 * 1024) {
-      setPaymentQrError('The image is too large. Choose a file under 8 MB.')
+    if (file.size > MAX_PAYMENT_QR_BYTES) {
+      setPaymentQrError('The image must be 3 MB or smaller. Choose a smaller file.')
       input.value = ''
       return
     }
@@ -407,14 +410,17 @@ function AdminDashboard() {
   function clickCell(courtId: string, hour: number) {
     if (adminStoreLoading) return
     const dayIso = activeDayData.iso
-    if (isSlotPast(dayIso, hour)) return
-
     const booking = getBookingAt(dayIso, courtId, hour)
     if (booking) {
+      if (isSlotPast(dayIso, hour)) {
+        setViewingPastBooking(booking)
+        return
+      }
       setEditingBooking(booking)
       setSelections([])
       return
     }
+    if (isSlotPast(dayIso, hour)) return
 
     const block = getBlockAt(dayIso, courtId, hour)
     if (block) {
@@ -621,7 +627,7 @@ function AdminDashboard() {
               />
             </Field>
             {paymentQrFileName && <p className="mt-2 text-xs text-ink/50">Selected: {paymentQrFileName}</p>}
-            <p className="mt-2 text-xs text-ink/50">PNG, JPG, or WEBP · maximum 8 MB. Saved in this browser.</p>
+            <p className="mt-2 text-xs text-ink/50">PNG, JPG, or WEBP · maximum 3 MB. Saved in this browser.</p>
             <div className="mt-4 flex flex-wrap gap-2">
               <Button type="button" variant="primary" onClick={commitPaymentQr} disabled={!paymentQrDraft || isPreparingPaymentQr}>
                 {isPreparingPaymentQr ? 'Preparing image…' : 'Save QR code'}
@@ -786,9 +792,8 @@ function AdminDashboard() {
             <button
               type="button"
               aria-label="Previous week"
-              onClick={() => setWeekOffset((w) => Math.max(0, w - 1))}
-              disabled={weekOffset === 0}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sand/70 transition-colors hover:text-sand disabled:opacity-30"
+              onClick={() => setWeekOffset((w) => w - 1)}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sand/70 transition-colors hover:text-sand"
             >
               ‹
             </button>
@@ -877,9 +882,16 @@ function AdminDashboard() {
                     )
 
                     let cls =
-                      'flex h-11 items-center justify-center rounded-lg border text-base font-semibold transition-all sm:h-12 '
+                      'flex h-11 items-center justify-center rounded-lg border font-semibold transition-all sm:h-12 '
                     let label = ''
-                    if (past) {
+                    if (past && booking) {
+                      cls += booking.status === 'confirmed'
+                        ? 'cursor-pointer border-tide/30 bg-tide/15 text-ink/75 hover:bg-tide/25'
+                        : 'cursor-pointer border-citrus/40 bg-citrus/20 text-ink/75 hover:bg-citrus/30'
+                      label = booking.source === 'reclub'
+                        ? 'Reclub'
+                        : booking.name.trim().split(/\s+/)[0] || 'Booked'
+                    } else if (past) {
                       cls += 'cursor-not-allowed border-ink/5 bg-sand-dim text-ink/25'
                     } else if (booking?.status !== 'confirmed' && booking) {
                       cls += 'cursor-pointer border-citrus bg-citrus text-ink'
@@ -907,18 +919,25 @@ function AdminDashboard() {
                       <button
                         key={h.hour}
                         type="button"
-                        disabled={past || adminStoreLoading}
+                        disabled={(past && !booking) || adminStoreLoading}
                         onClick={() => clickCell(court.id, h.hour)}
-                        className={cls}
+                        className={`${cls}${past && booking ? ' text-[9px] leading-tight' : ' text-base'}`}
+                        aria-label={
+                          booking
+                            ? `${booking.source === 'reclub' ? 'Reclub booking' : `Booking by ${booking.name}`}, ${rangeLabel(booking.startHour, booking.endHour)}, ${booking.status}`
+                            : block?.reason || (block ? 'Blocked time' : `Available at ${h.label}`)
+                        }
                         title={
                           booking
                             ? booking.source === 'reclub'
                               ? `Reclub booking · ${rangeLabel(booking.startHour, booking.endHour)}`
-                              : `${booking.sport ? `${booking.sport} · ` : ''}${booking.name} · ${booking.mobile} · ${booking.status === 'confirmed' ? 'Confirmed' : 'Reserved'}`
+                              : `${booking.sport ? `${booking.sport} · ` : ''}${booking.name} · ${booking.mobile} · ${booking.status}`
                             : block?.reason || (block ? 'Blocked' : undefined)
                         }
                       >
-                        {booking?.source === 'reclub' ? <ReclubLogo className="h-7 w-7" /> : label}
+                        {booking?.source === 'reclub' && !past
+                          ? <ReclubLogo className="h-7 w-7" />
+                          : <span className={past && booking ? 'max-w-full truncate px-0.5' : undefined}>{label}</span>}
                       </button>
                     )
                   })}
@@ -929,8 +948,9 @@ function AdminDashboard() {
         </div>
 
         <p className="border-t border-ink/10 px-4 py-3 text-xs text-ink/55 sm:px-6">
-          Tap an open slot to select a time range, tap a booked slot (orange) to reschedule or cancel
-          it, or tap a blocked slot (dark) to unblock it.
+          Past bookings remain visible by booker name; select one to view its details. Tap an open slot
+          to select a time range, a future booking (orange) to reschedule or cancel it, or a blocked slot
+          (dark) to unblock it.
         </p>
       </div>
       </>
@@ -970,6 +990,10 @@ function AdminDashboard() {
         <BookingEditModal booking={editingBooking} onClose={() => setEditingBooking(null)} />
       )}
 
+      {viewingPastBooking && (
+        <PastBookingDetails booking={viewingPastBooking} onClose={() => setViewingPastBooking(null)} />
+      )}
+
       {viewingBlockId && (
         <BlockModal blockId={viewingBlockId} onClose={() => setViewingBlockId(null)} />
       )}
@@ -991,6 +1015,49 @@ function LegendSwatch({ className, label }: { className: string; label: string }
 function rangeLabel(startHour: number, endHour: number) {
   const fmt = (h: number) => `${h % 12 || 12}${h < 12 || h === 24 ? 'AM' : 'PM'}`
   return `${fmt(startHour)}–${fmt(endHour)}`
+}
+
+function PastBookingDetails({ booking, onClose }: { booking: StoredBooking; onClose: () => void }) {
+  const date = new Date(`${booking.dayIso}T00:00:00`)
+  const sourceLabel = booking.source === 'admin'
+    ? 'Added by staff'
+    : booking.source === 'reclub'
+      ? 'Assigned from Reclub'
+      : 'Booked by customer'
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-ink/50 p-4 sm:items-center"
+      onClick={onClose}
+    >
+      <div
+        className="my-auto w-full max-w-md rounded-card border border-ink/10 bg-sand p-5 shadow-xl shadow-ink/10 sm:p-8"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-display text-lg font-semibold text-ink">{booking.name}</h3>
+            <p className="mt-1 text-xs text-ink/50">{booking.reference}</p>
+          </div>
+          <ModalCloseButton onClose={onClose} />
+        </div>
+        <dl className="mt-5 space-y-3 rounded-xl bg-white p-4 text-sm">
+          <div className="flex justify-between gap-4"><dt className="text-ink/55">Date</dt><dd className="text-right font-medium text-ink">{formatFullDate(date)}</dd></div>
+          <div className="flex justify-between gap-4"><dt className="text-ink/55">Court</dt><dd className="text-right font-medium text-ink">{booking.courtName}</dd></div>
+          <div className="flex justify-between gap-4"><dt className="text-ink/55">Time</dt><dd className="text-right font-medium text-ink">{rangeLabel(booking.startHour, booking.endHour)}</dd></div>
+          <div className="flex justify-between gap-4"><dt className="text-ink/55">Booked by</dt><dd className="text-right font-medium text-ink">{sourceLabel}</dd></div>
+          {booking.mobile && <div className="flex justify-between gap-4"><dt className="text-ink/55">Mobile</dt><dd className="text-right font-medium text-ink">{booking.mobile}</dd></div>}
+          {booking.email && <div className="flex justify-between gap-4"><dt className="text-ink/55">Email</dt><dd className="break-all text-right font-medium text-ink">{booking.email}</dd></div>}
+          {booking.sport && <div className="flex justify-between gap-4"><dt className="text-ink/55">Sport</dt><dd className="text-right font-medium text-ink">{booking.sport}</dd></div>}
+          {booking.notes && <div className="flex justify-between gap-4"><dt className="text-ink/55">Notes</dt><dd className="text-right font-medium text-ink">{booking.notes}</dd></div>}
+          <div className="flex justify-between gap-4"><dt className="text-ink/55">Status</dt><dd className="text-right font-medium capitalize text-ink">{booking.status}</dd></div>
+        </dl>
+        <Button type="button" variant="primary" className="mt-5 w-full" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 function SelectionActionBar({

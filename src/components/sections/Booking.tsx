@@ -22,6 +22,8 @@ import { getPaymentQrCode, loadPaymentQrCode } from '../../data/paymentQr'
 import { sports } from '../../data/sports'
 import qrPlaceholder from '../../assets/payment-qr-placeholder.png'
 
+const MAX_SCREENSHOT_BYTES = 3 * 1024 * 1024 // 3 MB
+
 interface Selection {
   courtId: string
   courtName: string
@@ -208,22 +210,22 @@ export default function Booking() {
 
   function choosePaymentScreenshot(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
     setPaymentScreenshotError('')
     if (!file) return
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
       setPaymentScreenshot(null)
       setPaymentScreenshotError('Choose a PNG, JPG, or WEBP screenshot.')
-      event.currentTarget.value = ''
       return
     }
-    if (file.size > 8 * 1024 * 1024) {
+
+    if (file.size > MAX_SCREENSHOT_BYTES) {
       setPaymentScreenshot(null)
-      setPaymentScreenshotError('The screenshot must be under 8 MB.')
-      event.currentTarget.value = ''
+      setPaymentScreenshotError('The screenshot must be 3 MB or smaller. Choose a smaller image.')
       return
     }
+
     setPaymentScreenshot(file)
-    event.currentTarget.value = ''
   }
 
   async function confirmBooking() {
@@ -626,7 +628,9 @@ export default function Booking() {
                   className="w-full rounded-xl border border-ink/15 bg-white px-3.5 py-2.5 text-sm text-ink file:mr-3 file:rounded-lg file:border-0 file:bg-citrus/20 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-ink outline-none transition-all duration-200 focus:border-citrus focus:ring-4 focus:ring-citrus/15"
                 />
               </Field>
-              <p className="-mt-2 text-xs text-ink/50">Upload a clear screenshot of your GCash or Maya payment. PNG, JPG, or WEBP, up to 8 MB.</p>
+              <p className="-mt-2 text-xs text-ink/50">
+                Upload a clear screenshot of your GCash or Maya payment. PNG, JPG, or WEBP — maximum 3 MB.
+              </p>
               {paymentScreenshotError && <p role="alert" className="-mt-2 text-xs font-medium text-tide">{paymentScreenshotError}</p>}
               {paymentScreenshotPreview && (
                 <div className="rounded-xl border border-ink/10 bg-white p-2">

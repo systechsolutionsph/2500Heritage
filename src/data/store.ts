@@ -229,7 +229,8 @@ function screenshotExtension(file: File) {
   }
   const extension = extensions[file.type]
   if (!extension) throw new Error('Choose a PNG, JPG, or WEBP screenshot.')
-  if (file.size > 8 * 1024 * 1024) throw new Error('The screenshot must be under 8 MB.')
+  // Keep the upload limit enforced for every booking creation path.
+  if (file.size > 3 * 1024 * 1024) throw new Error('The screenshot must be 3 MB or smaller.')
   return extension
 }
 
